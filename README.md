@@ -4,9 +4,9 @@ Composite actions for automated changelog generation and releases via [changeset
 
 ## Actions
 
-### `generate-changesets` — Auto-generate changelogs from conventional commits
+### `generate-changesets`
 
-Parses conventional commits on a PR branch, maps changed files to monorepo packages, determines semver bumps, and writes `.changeset/*.md` files. Optionally enhances raw commit details into user-facing changelog entries via GitHub Copilot CLI.
+Auto-generate changeset files from conventional commits on a PR. Optionally uses [GitHub Copilot CLI](https://github.com/github/copilot) to rewrite raw commit details into polished changelog entries.
 
 ```yaml
 # .github/workflows/changeset.yml
@@ -32,25 +32,29 @@ jobs:
           copilot-pat: ${{ secrets.COPILOT_PAT }}  # optional
 ```
 
+#### What it does
+
+1. Scans `base..HEAD` for conventional commits (`feat:`, `fix:`, `perf:`, `refactor:`)
+2. Maps changed files to packages via `package.json` workspaces or `pnpm-workspace.yaml`
+3. Writes `.changeset/auto-<package>-<id>.md` per affected package with the semver bump in frontmatter
+4. **Copilot enhancement** (if `copilot-pat` provided): installs Copilot CLI, reads each commit's actual diff via `git show`, and rewrites the raw commit details into concise user-facing changelog bullets. Runs with `continue-on-error` — if Copilot is unavailable, the raw details are kept.
+5. Commits and pushes the changeset files to the PR branch
+
+Commits prefixed with `docs:`, `test:`, `ci:`, `chore:`, `style:`, or `build:` are skipped.
+
 #### Inputs
 
 | Input | Default | Description |
 |-------|---------|-------------|
 | `base` | `origin/main` | Base branch to diff against |
 | `cap-major` | `true` | Cap major bumps to minor (useful pre-1.0) |
-| `copilot-pat` | `""` | GitHub PAT with Copilot access. If omitted, raw commit details are kept. |
+| `copilot-pat` | `""` | GitHub PAT with Copilot access for AI changelog enhancement |
 
-#### How it works
+---
 
-1. Scans commits between `base..HEAD` for conventional commit messages (`feat:`, `fix:`, etc.)
-2. Maps changed files to packages via workspace config (`package.json` workspaces or `pnpm-workspace.yaml`)
-3. Writes one `.changeset/auto-<package>-<id>.md` per affected package with the appropriate semver bump
-4. If `copilot-pat` is set: Copilot CLI reads each commit's actual diff and rewrites the raw details into concise changelog bullets
-5. Commits and pushes the changeset files to the PR branch
+### `release`
 
-### `release` — Changeset-based releases with git tags
-
-Uses `changesets/action` to either create a release PR (when changesets are pending) or tag + publish (when the release PR is merged). Optionally creates a GitHub Release.
+Wraps `changesets/action` with idempotent git tagging and GitHub Release creation. Safe for both npm-published and private packages — checks for existing tags and releases before creating, so it never duplicates what changesets already did.
 
 ```yaml
 # .github/workflows/release.yml
@@ -70,7 +74,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: npm install  # or bun install, pnpm install
+      - run: npm install
 
       - uses: thejustinwalsh/workflows/release@v1
         with:
@@ -80,12 +84,22 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
+#### What it does
+
+1. Delegates to `changesets/action@v1` — creates a release PR when changesets are pending, or runs the publish command when the release PR is merged
+2. After publish: reads the version from `version-package` and checks if a `v<version>` git tag already exists
+3. **If tag missing** (private packages that skip `changeset publish`): creates the git tag and pushes it
+4. **If tag exists** (npm publish already created per-package tags): skips — no double-tag
+5. Same check for GitHub Releases — creates one only if changesets didn't already
+
+This means the action works correctly whether your packages are public (npm publish creates tags/releases) or private (our action fills the gap).
+
 #### Inputs
 
 | Input | Default | Description |
 |-------|---------|-------------|
 | `version-command` | `npx changeset version` | Command to bump versions |
-| `publish-command` | `""` | Post-version command (e.g. build). Empty = skip. |
+| `publish-command` | `""` | Post-version command (build, npm publish, etc.) |
 | `title` | `chore: release` | Release PR title |
 | `commit` | `chore: release` | Release PR commit message |
 | `version-package` | `./package.json` | Package.json to read version from for git tag |
@@ -98,6 +112,15 @@ jobs:
 | `published` | `true` if a new version was tagged |
 | `published-packages` | JSON array of published packages |
 | `version` | The version string (e.g. `0.2.0`) |
+
+---
+
+## Secrets
+
+| Secret | Used by | Required | Purpose |
+|--------|---------|----------|---------|
+| `GITHUB_TOKEN` | release | Yes (auto-provided) | PR creation, tagging, releases |
+| `COPILOT_PAT` | generate-changesets | No | GitHub PAT with Copilot access for AI-enhanced changelogs |
 
 ## LLM Setup Prompt
 
