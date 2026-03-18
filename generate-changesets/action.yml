@@ -27,10 +27,15 @@ runs:
           echo "skip=true" >> "$GITHUB_OUTPUT"
         fi
 
-    - name: Fetch full history
+    - name: Fetch full history and base branch
       if: steps.check.outputs.skip != 'true'
       shell: bash
-      run: git fetch --unshallow || true
+      run: |
+        git fetch --unshallow || true
+        # Ensure the base ref is available (strip origin/ prefix if present)
+        base_branch="${{ inputs.base }}"
+        base_branch="${base_branch#origin/}"
+        git fetch origin "$base_branch" || true
 
     - name: Generate template changesets
       if: steps.check.outputs.skip != 'true'
