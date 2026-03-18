@@ -55,46 +55,57 @@ function branchId(base) {
 
 // --- Package discovery ---
 
-function getWorkspaceDirs() {
+/** Returns raw workspace entries from package.json or pnpm-workspace.yaml. */
+function getWorkspaceEntries() {
 	// Try package.json workspaces
 	try {
 		const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf-8"));
-		if (Array.isArray(pkg.workspaces)) {
-			return pkg.workspaces.map((w) => w.replace(/\/\*$/, ""));
-		}
+		if (Array.isArray(pkg.workspaces)) return pkg.workspaces;
 	} catch {}
 
 	// Try pnpm-workspace.yaml
 	try {
 		const yaml = readFileSync(join(ROOT, "pnpm-workspace.yaml"), "utf-8");
-		const dirs = [];
+		const entries = [];
 		for (const line of yaml.split("\n")) {
-			const match = line.match(/^\s*-\s*['"]?([^'"*\s]+)/);
-			if (match) dirs.push(match[1].replace(/\/\*$/, ""));
+			const match = line.match(/^\s*-\s*['"]?([^'"}\s]+)/);
+			if (match) entries.push(match[1]);
 		}
-		if (dirs.length > 0) return dirs;
+		if (entries.length > 0) return entries;
 	} catch {}
 
-	// Fallback
-	return ["packages", "apps"];
+	return [];
 }
 
 function discoverPackages() {
 	const mapping = new Map();
-	for (const dir of getWorkspaceDirs()) {
-		const absDir = join(ROOT, dir);
-		if (!existsSync(absDir)) continue;
-		for (const entry of readdirSync(absDir)) {
-			const pkgPath = join(absDir, entry, "package.json");
+
+	for (const entry of getWorkspaceEntries()) {
+		if (entry.endsWith("/*")) {
+			// Glob pattern: "packages/*" — scan subdirectories
+			const parent = entry.slice(0, -2);
+			const absParent = join(ROOT, parent);
+			if (!existsSync(absParent)) continue;
+			for (const child of readdirSync(absParent)) {
+				const pkgPath = join(absParent, child, "package.json");
+				if (!existsSync(pkgPath)) continue;
+				try {
+					const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+					if (pkg.name) mapping.set(`${parent}/${child}/`, pkg.name);
+				} catch {}
+			}
+		} else {
+			// Direct path: "generate-changesets" — the entry itself is a package
+			const dir = entry.replace(/\/$/, "");
+			const pkgPath = join(ROOT, dir, "package.json");
 			if (!existsSync(pkgPath)) continue;
 			try {
 				const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
-				if (pkg.name) {
-					mapping.set(`${dir}/${entry}/`, pkg.name);
-				}
+				if (pkg.name) mapping.set(`${dir}/`, pkg.name);
 			} catch {}
 		}
 	}
+
 	return mapping;
 }
 
