@@ -61,16 +61,45 @@ runs:
         echo "version=$version" >> "$GITHUB_OUTPUT"
         echo "Published version: $version"
 
-    - name: Create git tag
+    # Only create git tag if changesets didn't already (i.e. no npm publish happened).
+    # When publish-command runs `changeset publish`, changesets creates per-package
+    # tags (@scope/pkg@version) and GitHub Releases automatically.
+    # We only need to fill in when that path is skipped (private packages).
+    - name: Check if tag exists
       if: steps.changesets.outputs.published == 'true'
+      id: tag-check
       shell: bash
       run: |
         tag="v${{ steps.version.outputs.version }}"
-        git tag "$tag" || echo "Tag $tag already exists"
-        git push origin "$tag" || echo "Tag $tag already pushed"
+        if git rev-parse "$tag" >/dev/null 2>&1; then
+          echo "exists=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "exists=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Create git tag
+      if: steps.changesets.outputs.published == 'true' && steps.tag-check.outputs.exists == 'false'
+      shell: bash
+      run: |
+        tag="v${{ steps.version.outputs.version }}"
+        git tag "$tag"
+        git push origin "$tag"
+
+    - name: Check if GitHub Release exists
+      if: steps.changesets.outputs.published == 'true' && inputs.create-github-release == 'true'
+      id: release-check
+      shell: bash
+      env:
+        GH_TOKEN: ${{ env.GITHUB_TOKEN }}
+      run: |
+        if gh release view "v${{ steps.version.outputs.version }}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+          echo "exists=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "exists=false" >> "$GITHUB_OUTPUT"
+        fi
 
     - name: Create GitHub Release
-      if: steps.changesets.outputs.published == 'true' && inputs.create-github-release == 'true'
+      if: steps.changesets.outputs.published == 'true' && inputs.create-github-release == 'true' && steps.release-check.outputs.exists == 'false'
       shell: bash
       env:
         GH_TOKEN: ${{ env.GITHUB_TOKEN }}
