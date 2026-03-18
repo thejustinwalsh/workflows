@@ -1,5 +1,5 @@
 name: "Changeset Release"
-description: "Version, publish, and tag via changesets. Outputs npm-published packages, tagged-only packages, and repo-level version for downstream release jobs."
+description: "Version, publish, and tag via changesets. Outputs what was published to npm, what was tagged (private), and whether anything was released."
 
 inputs:
   version-command:
@@ -14,23 +14,16 @@ inputs:
     description: "Commit message for the release PR"
     required: false
     default: "chore: release"
-  version-package:
-    description: "Path to a package.json to read the repo-level version from for the unified v<version> tag"
-    required: false
-    default: "./package.json"
 
 outputs:
-  published:
-    description: "true when a new version is released — gate downstream jobs on this"
-    value: ${{ steps.detect-release.outputs.published }}
-  version:
-    description: "Repo-level version (e.g. 1.2.0) — use with gh release create v<version>"
-    value: ${{ steps.detect-release.outputs.version }}
+  released:
+    description: "true if anything was published or tagged — gate downstream jobs on this"
+    value: ${{ steps.summary.outputs.released }}
   published-packages:
-    description: "JSON array of npm-published packages [{name, version}] — these already have per-package tags and changesets GitHub Releases"
+    description: "JSON array of npm-published packages [{name, version}]"
     value: ${{ steps.changesets.outputs.publishedPackages }}
   tagged-packages:
-    description: "JSON array of private packages that were git-tagged but NOT npm-published [{name, version}] — use for per-package artifact releases"
+    description: "JSON array of private packages that were git-tagged but NOT npm-published [{name, version}]"
     value: ${{ steps.collect-tagged.outputs.packages }}
 
 runs:
@@ -50,43 +43,32 @@ runs:
       env:
         GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
 
-    # Step 2: Detect new repo-level version by comparing package.json to git tags
-    - name: Detect release
-      id: detect-release
-      shell: bash
-      run: |
-        version=$(node -e "console.log(require('${{ inputs.version-package }}').version)")
-        tag="v$version"
-
-        if git rev-parse "$tag" >/dev/null 2>&1; then
-          echo "published=false" >> "$GITHUB_OUTPUT"
-          echo "version=" >> "$GITHUB_OUTPUT"
-          echo "Tag $tag already exists — no new release"
-        else
-          echo "published=true" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "New release: $tag"
-        fi
-
-    # Step 3: Create unified repo-level tag
-    - name: Create repo-level tag
-      if: steps.detect-release.outputs.published == 'true'
-      shell: bash
-      run: |
-        git tag "v${{ steps.detect-release.outputs.version }}"
-        git push origin "v${{ steps.detect-release.outputs.version }}"
-
-    # Step 4: Collect private packages that were tagged but not npm-published.
-    # changesets/action only reports npm-published packages in publishedPackages.
-    # Private packages with privatePackages.tag: true get git tags silently.
-    # We diff all workspace packages against the npm-published list to find them.
+    # Step 2: Collect private packages that were tagged but not npm-published.
     - name: Collect tagged-only packages
-      if: steps.detect-release.outputs.published == 'true'
       id: collect-tagged
       shell: bash
       run: |
         packages=$(node ${{ github.action_path }}/collect-tagged.mjs)
         echo "packages=$packages" >> "$GITHUB_OUTPUT"
-        echo "Tagged-only packages: $packages"
+        echo "Tagged packages: $packages"
       env:
         CHANGESETS_PUBLISHED: ${{ steps.changesets.outputs.publishedPackages || '[]' }}
+
+    # Step 3: Set released=true if anything was published or tagged.
+    - name: Summarize
+      id: summary
+      shell: bash
+      run: |
+        published='${{ steps.changesets.outputs.publishedPackages }}'
+        tagged='${{ steps.collect-tagged.outputs.packages }}'
+
+        has_published=$(node -e "console.log(JSON.parse(process.argv[1] || '[]').length > 0)" "$published")
+        has_tagged=$(node -e "console.log(JSON.parse(process.argv[1] || '[]').length > 0)" "$tagged")
+
+        if [ "$has_published" = "true" ] || [ "$has_tagged" = "true" ]; then
+          echo "released=true" >> "$GITHUB_OUTPUT"
+          echo "Released: published=$has_published tagged=$has_tagged"
+        else
+          echo "released=false" >> "$GITHUB_OUTPUT"
+          echo "Nothing released"
+        fi

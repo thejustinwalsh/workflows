@@ -123,9 +123,8 @@ from thejustinwalsh/workflows. Follow these steps exactly:
        runs-on: ubuntu-latest
        if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
        outputs:
-         published: ${{ steps.release.outputs.published }}
-         version: ${{ steps.release.outputs.version }}
-         tagged-packages: ${{ steps.release.outputs.tagged-packages }}
+         released: ${{ steps.release.outputs.released }}
+         tagged: ${{ steps.release.outputs.tagged-packages }}
        steps:
          - uses: actions/checkout@v6
          - run: npm install
@@ -135,24 +134,23 @@ from thejustinwalsh/workflows. Follow these steps exactly:
              GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
      # Add downstream jobs here. Example:
-     # create-release:
+     # build:
      #   needs: release
-     #   if: needs.release.outputs.published == 'true'
+     #   if: needs.release.outputs.released == 'true'
      #   runs-on: ubuntu-latest
      #   steps:
      #     - uses: actions/checkout@v6
      #     - run: ./build-artifacts.sh
+     #     # Attach artifacts to a per-package tag
      #     - run: |
-     #         gh release create "v${{ needs.release.outputs.version }}" \
-     #           --generate-notes \
-     #           dist/*
+     #         pkg=$(echo '${{ needs.release.outputs.tagged }}' | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8'));console.log(d[0]?.name+'@'+d[0]?.version)")
+     #         gh release create "$pkg" --generate-notes dist/*
      #       env:
      #         GH_TOKEN: ${{ github.token }}
 
    Adjust the install command (npm/bun/pnpm) to match your project.
    The "workflows: [CI]" trigger must match your CI workflow's name exactly.
-   Override version-command and version-package inputs only if the defaults
-   (npx changeset version, ./package.json) don't work for your setup.
+   Override version-command only if `npx changeset version` doesn't work.
 
 Notes:
 - The repo must use conventional commits: feat:, fix:, perf:, refactor:
@@ -161,9 +159,11 @@ Notes:
   pnpm-workspace.yaml. No manual package list needed.
 - changeset publish runs automatically inside the release action. It publishes
   public packages to npm and tags private packages (with privatePackages.tag: true).
-- The release action outputs published-packages (npm-published) and
-  tagged-packages (private, tagged but not npm-published) as JSON arrays.
-  Use these to build per-package artifacts or create GitHub Releases.
+- The release action outputs:
+  - released (boolean) — true if anything was published or tagged
+  - published-packages — JSON array of npm-published packages
+  - tagged-packages — JSON array of private packages that were tagged
+  Use these to gate downstream jobs and create per-package GitHub Releases.
 - If COPILOT_PAT secret is configured, changeset files are enhanced by
   GitHub Copilot CLI. Optional — continues on error if unavailable.
 ````

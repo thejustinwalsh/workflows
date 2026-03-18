@@ -1,12 +1,10 @@
 # release
 
-Handles the changeset release lifecycle: creates a release PR, publishes npm packages (if any), creates a unified git tag, and outputs everything downstream jobs need to build artifacts and create GitHub Releases.
-
-The action does **not** create a GitHub Release — that's your job, because only you know what artifacts to attach.
+Handles the changeset release lifecycle: creates a release PR, publishes npm packages (if any), and tags private packages. Outputs what happened so downstream jobs can build artifacts and create GitHub Releases.
 
 ## Usage
 
-### Minimal (private packages, no npm)
+### Minimal
 
 ```yaml
 - uses: actions/checkout@v6
@@ -17,11 +15,11 @@ The action does **not** create a GitHub Release — that's your job, because onl
   env:
     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-- if: steps.release.outputs.published == 'true'
-  run: echo "Released v${{ steps.release.outputs.version }}"
+- if: steps.release.outputs.released == 'true'
+  run: echo "Something was released"
 ```
 
-### With bun and custom version command
+### With bun
 
 ```yaml
 - uses: actions/checkout@v6
@@ -32,20 +30,19 @@ The action does **not** create a GitHub Release — that's your job, because onl
   uses: thejustinwalsh/workflows/release@v1
   with:
     version-command: bun run changeset:version
-    version-package: ./packages/core/package.json
   env:
     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-### Unified release with artifacts
+### Build artifacts when private packages are tagged
 
 ```yaml
 jobs:
   release:
     runs-on: ubuntu-latest
     outputs:
-      published: ${{ steps.release.outputs.published }}
-      version: ${{ steps.release.outputs.version }}
+      released: ${{ steps.release.outputs.released }}
+      tagged: ${{ steps.release.outputs.tagged-packages }}
     steps:
       - uses: actions/checkout@v6
       - run: npm install
@@ -54,29 +51,30 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  build-and-release:
+  build:
     needs: release
-    if: needs.release.outputs.published == 'true'
+    if: needs.release.outputs.released == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - run: ./build.sh
+      - run: ./build-artifacts.sh
+      # Create a release for a specific package tag
       - run: |
-          gh release create "v${{ needs.release.outputs.version }}" \
+          gh release create "@acme/cli@1.2.0" \
             --generate-notes \
-            dist/my-artifact.zip
+            dist/cli-*
         env:
           GH_TOKEN: ${{ github.token }}
 ```
 
-### Per-package releases for private packages
+### Per-package matrix from tagged packages
 
 ```yaml
 jobs:
   release:
     runs-on: ubuntu-latest
     outputs:
-      published: ${{ steps.release.outputs.published }}
+      released: ${{ steps.release.outputs.released }}
       tagged: ${{ steps.release.outputs.tagged-packages }}
     steps:
       - uses: actions/checkout@v6
@@ -88,10 +86,10 @@ jobs:
 
   deploy:
     needs: release
-    if: needs.release.outputs.published == 'true'
+    if: needs.release.outputs.released == 'true'
     strategy:
       matrix:
-        pkg: ${{ fromJson(needs.release.outputs.tagged-packages) }}
+        pkg: ${{ fromJson(needs.release.outputs.tagged) }}
     runs-on: ubuntu-latest
     steps:
       - run: echo "Deploy ${{ matrix.pkg.name }}@${{ matrix.pkg.version }}"
@@ -105,9 +103,11 @@ jobs:
   env:
     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-- if: steps.release.outputs.published == 'true'
+- if: steps.release.outputs.released == 'true'
   run: |
-    major="v$(echo "${{ steps.release.outputs.version }}" | cut -d. -f1)"
+    # Read version from a workspace package that changesets bumps
+    version=$(node -e "console.log(require('./release/package.json').version)")
+    major="v$(echo "$version" | cut -d. -f1)"
     git tag -f "$major"
     git push origin "$major" --force
 ```
@@ -116,10 +116,8 @@ jobs:
 
 1. `changesets/action` creates a release PR when changesets are pending, or runs `changeset publish` when the release PR is merged
 2. `changeset publish` publishes public packages to npm (creates per-package tags) and tags private packages silently (with `privatePackages.tag: true`)
-3. Detects new repo-level version by comparing `version-package` against existing git tags
-4. Creates a unified `v<version>` git tag
-5. Collects private tagged-but-not-published packages
-6. Outputs `published`, `version`, `published-packages`, and `tagged-packages`
+3. Collects private tagged-but-not-published packages by diffing workspace packages against changesets' npm output
+4. Sets `released=true` if either published or tagged arrays are non-empty
 
 ## Inputs
 
@@ -128,13 +126,11 @@ jobs:
 | `version-command` | `npx changeset version` | Command to bump versions |
 | `title` | `chore: release` | Release PR title |
 | `commit` | `chore: release` | Release PR commit message |
-| `version-package` | `./package.json` | Package.json to read version from for unified tag |
 
 ## Outputs
 
 | Output | Contains | Use case |
 |--------|----------|----------|
-| `published` | `true` when a new version is released | Gate all downstream jobs |
-| `version` | Repo-level version (e.g. `1.2.0`) | `gh release create v1.2.0` |
-| `published-packages` | JSON `[{name, version}]` of npm-published packages | Attach artifacts to existing per-package releases |
-| `tagged-packages` | JSON `[{name, version}]` of private tagged packages | Create per-package releases for private packages |
+| `released` | `true` if anything was published or tagged | Gate all downstream jobs |
+| `published-packages` | JSON `[{name, version}]` of npm-published packages | Already have per-package tags from changesets |
+| `tagged-packages` | JSON `[{name, version}]` of private tagged packages | Create per-package releases with artifacts |

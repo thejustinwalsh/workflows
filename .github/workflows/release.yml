@@ -32,22 +32,18 @@ jobs:
 
       - run: npm install
 
-      # Dogfood: use our own release action via local path
       - id: release
         uses: ./release
-        with:
-          version-command: npx changeset version
-          version-package: ./package.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # Update floating major version tag (v1, v2, etc.)
       # This is the convention for GitHub Actions — users pin to @v1
-      # and get all minor/patch updates automatically.
       - name: Update major version tag
-        if: steps.release.outputs.published == 'true'
+        if: steps.release.outputs.released == 'true'
         run: |
-          version="${{ steps.release.outputs.version }}"
+          # Read version from a workspace package that changesets bumps
+          version=$(node -e "console.log(require('./release/package.json').version)")
           major="v$(echo "$version" | cut -d. -f1)"
           git tag -f "$major"
           git push origin "$major" --force
