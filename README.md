@@ -54,7 +54,9 @@ Commits prefixed with `docs:`, `test:`, `ci:`, `chore:`, `style:`, or `build:` a
 
 ### `release`
 
-Wraps `changesets/action` with idempotent git tagging and GitHub Release creation. Safe for both npm-published and private packages — checks for existing tags and releases before creating, so it never duplicates what changesets already did.
+Handles the changeset release lifecycle: creates a release PR, publishes npm packages (if any), creates a git tag, and outputs `published` + `version` so downstream jobs can build artifacts and create GitHub Releases.
+
+The action does **not** create a GitHub Release itself — that's your job, because only you know what artifacts to attach.
 
 ```yaml
 # .github/workflows/release.yml
@@ -72,46 +74,184 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    outputs:
+      published: ${{ steps.release.outputs.published }}
+      version: ${{ steps.release.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: npm install
-
-      - uses: thejustinwalsh/workflows/release@v1
-        with:
-          version-command: npx changeset version
-          version-package: ./package.json
+      - id: release
+        uses: thejustinwalsh/workflows/release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Your downstream job — only runs when a new version is tagged
+  publish:
+    needs: release
+    if: needs.release.outputs.published == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Build artifacts for v${{ needs.release.outputs.version }}"
+      # Build your artifacts here, then:
+      - run: |
+          gh release create "v${{ needs.release.outputs.version }}" \
+            --generate-notes \
+            ./my-artifact.zip
+        env:
+          GH_TOKEN: ${{ github.token }}
 ```
 
 #### What it does
 
-1. Delegates to `changesets/action@v1` — creates a release PR when changesets are pending, or runs the publish command when the release PR is merged
-2. After publish: reads the version from `version-package` and checks if a `v<version>` git tag already exists
-3. **If tag missing** (private packages that skip `changeset publish`): creates the git tag and pushes it
-4. **If tag exists** (npm publish already created per-package tags): skips — no double-tag
-5. Same check for GitHub Releases — creates one only if changesets didn't already
-
-This means the action works correctly whether your packages are public (npm publish creates tags/releases) or private (our action fills the gap).
+1. Delegates to `changesets/action@v1` — creates a release PR when changesets are pending, or runs `changeset publish` when the release PR is merged
+2. `changeset publish` handles: npm publish for public packages (creates per-package tags + `"New tag:"` output), git tags for private packages with `privatePackages.tag: true` (silent — no stdout)
+3. Detects new repo-level version by comparing `version-package` against existing git tags
+4. Creates a unified `v<version>` git tag
+5. Collects private tagged-but-not-published packages by diffing workspace packages against changesets' npm output
+6. Outputs everything downstream jobs need
 
 #### Inputs
 
 | Input | Default | Description |
 |-------|---------|-------------|
 | `version-command` | `npx changeset version` | Command to bump versions |
-| `publish-command` | `""` | Post-version command (build, npm publish, etc.) |
 | `title` | `chore: release` | Release PR title |
 | `commit` | `chore: release` | Release PR commit message |
-| `version-package` | `./package.json` | Package.json to read version from for git tag |
-| `create-github-release` | `true` | Create a GitHub Release with auto-generated notes |
+| `version-package` | `./package.json` | Package.json to read version from for unified tag |
+
+#### Outputs
+
+| Output | Contains | Use case |
+|--------|----------|----------|
+| `published` | `true` when a new version is released | Gate all downstream jobs |
+| `version` | Repo-level version (e.g. `1.2.0`) | Unified release: `gh release create v1.2.0` |
+| `published-packages` | JSON `[{name, version}]` of npm-published packages | Already have per-package tags. Use to attach artifacts to existing releases. |
+| `tagged-packages` | JSON `[{name, version}]` of private packages that were tagged but NOT npm-published | Create per-package releases with artifacts for private packages. |
+
+#### Examples
+
+**Unified release with artifacts (noron — all private, builds ISOs):**
+```yaml
+jobs:
+  release:
+    outputs:
+      published: ${{ steps.release.outputs.published }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+      - run: bun install && bun run build
+      - id: release
+        uses: thejustinwalsh/workflows/release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-and-release:
+    needs: release
+    if: needs.release.outputs.published == 'true'
+    steps:
+      - run: make collect-dist && sudo ./build-iso.sh
+      - run: |
+          gh release create "v${{ needs.release.outputs.version }}" \
+            --generate-notes \
+            dist/*.iso
+```
+
+**Per-package npm releases (three-flatland — all public):**
+
+No extra work needed. `changeset publish` already published to npm and created per-package tags. Changesets/action created GitHub Releases. Use `published-packages` only if you need to attach additional artifacts:
+
+```yaml
+jobs:
+  release:
+    outputs:
+      published: ${{ steps.release.outputs.published }}
+      packages: ${{ steps.release.outputs.published-packages }}
+    steps:
+      - id: release
+        uses: thejustinwalsh/workflows/release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
+
+**Mixed public + private (zzfx-studio — npm packages + private app):**
+
+Public packages are npm-published automatically. Use `tagged-packages` to create releases for private packages that need artifacts:
+
+```yaml
+jobs:
+  release:
+    outputs:
+      published: ${{ steps.release.outputs.published }}
+      version: ${{ steps.release.outputs.version }}
+      tagged: ${{ steps.release.outputs.tagged-packages }}
+    steps:
+      - id: release
+        uses: thejustinwalsh/workflows/release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  deploy-app:
+    needs: release
+    if: needs.release.outputs.published == 'true'
+    strategy:
+      matrix:
+        pkg: ${{ fromJson(needs.release.outputs.tagged-packages) }}
+    steps:
+      - run: echo "Deploy ${{ matrix.pkg.name }}@${{ matrix.pkg.version }}"
+```
+
+**GitHub Action repo (workflows — floating major tag, no artifacts):**
+```yaml
+jobs:
+  release:
+    steps:
+      - id: release
+        uses: ./release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - if: steps.release.outputs.published == 'true'
+        run: |
+          major="v$(echo "${{ steps.release.outputs.version }}" | cut -d. -f1)"
+          git tag -f "$major"
+          git push origin "$major" --force
+```
+
+---
+
+### `filter-packages`
+
+Filter a JSON package array from `published-packages` or `tagged-packages` by name, scope, or exclusion list. Use to select specific packages for downstream matrix jobs without wasting runners on skipped steps.
+
+```yaml
+- id: platforms
+  uses: thejustinwalsh/workflows/filter-packages@v1
+  with:
+    packages: ${{ needs.release.outputs.tagged-packages }}
+    filter: "@zzfx-studio/*"
+    exclude: "@zzfx-studio/app"
+
+- if: steps.platforms.outputs.empty == 'false'
+  strategy:
+    matrix:
+      pkg: ${{ fromJson(steps.platforms.outputs.packages) }}
+  run: echo "Build ${{ matrix.pkg.name }}"
+```
+
+#### Inputs
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `packages` | (required) | JSON `[{name, version}]` array from release outputs |
+| `filter` | `*` | Name pattern: exact (`@noron/action`), scope glob (`@noron/*`), or comma-separated list |
+| `exclude` | `""` | Names to exclude, same format as filter |
 
 #### Outputs
 
 | Output | Description |
 |--------|-------------|
-| `published` | `true` if a new version was tagged |
-| `published-packages` | JSON array of published packages |
-| `version` | The version string (e.g. `0.2.0`) |
+| `packages` | Filtered JSON array |
+| `count` | Number of matches |
+| `empty` | `true` if nothing matched |
 
 ---
 
@@ -119,7 +259,7 @@ This means the action works correctly whether your packages are public (npm publ
 
 | Secret | Used by | Required | Purpose |
 |--------|---------|----------|---------|
-| `GITHUB_TOKEN` | release | Yes (auto-provided) | PR creation, tagging, releases |
+| `GITHUB_TOKEN` | release | Yes (auto-provided) | PR creation, tagging, npm publish (if applicable) |
 | `COPILOT_PAT` | generate-changesets | No | GitHub PAT with Copilot access for AI-enhanced changelogs |
 
 ## LLM Setup Prompt

@@ -1,0 +1,47 @@
+name: "Filter Packages"
+description: "Filter a JSON package array by name pattern, scope, or private status. Use to select specific packages from release outputs for downstream matrix jobs."
+
+inputs:
+  packages:
+    description: "JSON array of [{name, version, ...}] — typically from release action's published-packages or tagged-packages output"
+    required: true
+  filter:
+    description: "Name filter — exact match, glob prefix (e.g. '@scope/*'), or comma-separated list (e.g. '@noron/action,@noron/cli')"
+    required: false
+    default: "*"
+  exclude:
+    description: "Names to exclude — same format as filter (exact, glob prefix, or comma-separated)"
+    required: false
+    default: ""
+
+outputs:
+  packages:
+    description: "Filtered JSON array of [{name, version, ...}]"
+    value: ${{ steps.filter.outputs.packages }}
+  count:
+    description: "Number of packages after filtering"
+    value: ${{ steps.filter.outputs.count }}
+  empty:
+    description: "true if no packages matched the filter"
+    value: ${{ steps.filter.outputs.empty }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Filter packages
+      id: filter
+      shell: bash
+      run: |
+        result=$(node ${{ github.action_path }}/filter.mjs \
+          --packages '${{ inputs.packages }}' \
+          --filter '${{ inputs.filter }}' \
+          --exclude '${{ inputs.exclude }}')
+        count=$(echo "$result" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8'));console.log(d.length)")
+        echo "packages=$result" >> "$GITHUB_OUTPUT"
+        echo "count=$count" >> "$GITHUB_OUTPUT"
+        if [ "$count" = "0" ]; then
+          echo "empty=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "empty=false" >> "$GITHUB_OUTPUT"
+        fi
+        echo "Filtered to $count package(s)"
