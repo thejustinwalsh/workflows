@@ -12,7 +12,7 @@ jobs:
         uses: raven-actions/actionlint@v2
 
       - name: Security scan workflows
-        uses: zizmorcore/zizmor-action@v1
+        uses: zizmorcore/zizmor-action@v0.5.2
 
       - name: Validate generate script syntax
         run: node --check generate-changesets/generate.mjs
