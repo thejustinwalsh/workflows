@@ -99,6 +99,84 @@ jobs:
 | `published-packages` | JSON array of published packages |
 | `version` | The version string (e.g. `0.2.0`) |
 
+## LLM Setup Prompt
+
+Use the following prompt to instruct an LLM (Claude, Copilot, etc.) to set up or migrate a repo to use these actions:
+
+<details>
+<summary>Copy this prompt</summary>
+
+```
+Set up automated changelog generation and releases using the composite actions
+from thejustinwalsh/workflows. Here is what needs to happen:
+
+1. Install @changesets/cli and @changesets/changelog-github as devDependencies.
+
+2. Create .changeset/config.json with:
+   - "changelog": ["@changesets/changelog-github", { "repo": "<owner>/<repo>" }]
+   - "commit": false
+   - "access": "restricted" (unless publishing to npm, then "public")
+   - "baseBranch": "main"
+   - "updateInternalDependencies": "patch"
+   - "privatePackages": { "version": true, "tag": true }
+   - "fixed": [[...list all packages that should version together...]]
+   - "ignore": [...any packages that should not generate changelogs like examples or docs...]
+
+3. Add these scripts to the root package.json:
+   - "changeset": "changeset"
+   - "changeset:version": "changeset version"
+
+4. Create .github/workflows/changeset.yml:
+
+   name: Generate Changeset
+   on:
+     pull_request:
+       branches: [main]
+       types: [opened, synchronize]
+
+   jobs:
+     changeset:
+       runs-on: ubuntu-latest
+       permissions:
+         contents: write
+       steps:
+         - uses: actions/checkout@v4
+           with:
+             ref: ${{ github.event.pull_request.head.ref }}
+             fetch-depth: 0
+         - uses: thejustinwalsh/workflows/generate-changesets@v1
+           with:
+             copilot-pat: ${{ secrets.COPILOT_PAT }}
+
+5. Create .github/workflows/release.yml that:
+   - Triggers after CI passes on main (workflow_run) or via workflow_dispatch
+   - Sets permissions: contents: write, pull-requests: write
+   - Checks out code, installs deps, builds
+   - Uses thejustinwalsh/workflows/release@v1 with:
+     - version-command set to your package manager's changeset version command
+     - version-package pointing to the package.json to read the version from
+     - GITHUB_TOKEN passed via env
+   - Add any repo-specific post-release jobs (like building artifacts) that
+     trigger when the release action outputs published == 'true'
+
+6. Create .changeset/README.md explaining that changesets are auto-generated
+   from conventional commits on PRs.
+
+The repo must use conventional commits (feat:, fix:, perf:, refactor:, etc.)
+for the changeset generation to work. Commits prefixed with docs:, test:, ci:,
+chore:, style:, or build: are skipped.
+
+The generate-changesets action auto-discovers packages from package.json
+workspaces or pnpm-workspace.yaml. No manual package list needed.
+
+If COPILOT_PAT secret is configured, the raw changeset files will be enhanced
+by GitHub Copilot CLI which reads the actual git diffs and rewrites commit
+details into concise user-facing changelog bullets. This step is optional and
+continues on error if Copilot is unavailable.
+```
+
+</details>
+
 ## License
 
 MIT
