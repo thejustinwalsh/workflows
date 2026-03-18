@@ -1,15 +1,11 @@
 name: "Changeset Release"
-description: "Create a release PR via changesets, or tag and publish when the release PR is merged"
+description: "Version, publish, and tag via changesets. Outputs npm-published packages, tagged-only packages, and repo-level version for downstream release jobs."
 
 inputs:
   version-command:
     description: "Command to bump versions (e.g. 'pnpm changeset:version' or 'bun run changeset:version')"
     required: false
     default: "npx changeset version"
-  publish-command:
-    description: "Command to run after versioning (e.g. 'pnpm release' or 'bun run build'). Set to empty string to skip."
-    required: false
-    default: ""
   title:
     description: "Title for the release PR"
     required: false
@@ -19,91 +15,78 @@ inputs:
     required: false
     default: "chore: release"
   version-package:
-    description: "Path to a package.json to read the version from for git tagging (e.g. ./packages/shared/package.json)"
+    description: "Path to a package.json to read the repo-level version from for the unified v<version> tag"
     required: false
     default: "./package.json"
-  create-github-release:
-    description: "Create a GitHub Release with auto-generated notes when a version is published"
-    required: false
-    default: "true"
 
 outputs:
   published:
-    description: "Whether a new version was published"
-    value: ${{ steps.changesets.outputs.published }}
-  published-packages:
-    description: "JSON array of published packages"
-    value: ${{ steps.changesets.outputs.publishedPackages }}
+    description: "true when a new version is released — gate downstream jobs on this"
+    value: ${{ steps.detect-release.outputs.published }}
   version:
-    description: "The version that was published (if any)"
-    value: ${{ steps.version.outputs.version }}
+    description: "Repo-level version (e.g. 1.2.0) — use with gh release create v<version>"
+    value: ${{ steps.detect-release.outputs.version }}
+  published-packages:
+    description: "JSON array of npm-published packages [{name, version}] — these already have per-package tags and changesets GitHub Releases"
+    value: ${{ steps.changesets.outputs.publishedPackages }}
+  tagged-packages:
+    description: "JSON array of private packages that were git-tagged but NOT npm-published [{name, version}] — use for per-package artifact releases"
+    value: ${{ steps.collect-tagged.outputs.packages }}
 
 runs:
   using: "composite"
   steps:
+    # Step 1: Changesets creates a release PR or publishes.
+    # Public packages → npm publish + git tag + "New tag:" stdout
+    # Private packages (with privatePackages.tag: true) → git tag only, no stdout
     - name: Create Release Pull Request or Publish
       id: changesets
       uses: changesets/action@v1
       with:
-        publish: ${{ inputs.publish-command }}
+        publish: npx changeset publish
         version: ${{ inputs.version-command }}
         title: ${{ inputs.title }}
         commit: ${{ inputs.commit }}
       env:
         GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
 
-    - name: Get version
-      if: steps.changesets.outputs.published == 'true'
-      id: version
+    # Step 2: Detect new repo-level version by comparing package.json to git tags
+    - name: Detect release
+      id: detect-release
       shell: bash
       run: |
         version=$(node -e "console.log(require('${{ inputs.version-package }}').version)")
-        echo "version=$version" >> "$GITHUB_OUTPUT"
-        echo "Published version: $version"
+        tag="v$version"
 
-    # Only create git tag if changesets didn't already (i.e. no npm publish happened).
-    # When publish-command runs `changeset publish`, changesets creates per-package
-    # tags (@scope/pkg@version) and GitHub Releases automatically.
-    # We only need to fill in when that path is skipped (private packages).
-    - name: Check if tag exists
-      if: steps.changesets.outputs.published == 'true'
-      id: tag-check
-      shell: bash
-      run: |
-        tag="v${{ steps.version.outputs.version }}"
         if git rev-parse "$tag" >/dev/null 2>&1; then
-          echo "exists=true" >> "$GITHUB_OUTPUT"
+          echo "published=false" >> "$GITHUB_OUTPUT"
+          echo "version=" >> "$GITHUB_OUTPUT"
+          echo "Tag $tag already exists — no new release"
         else
-          echo "exists=false" >> "$GITHUB_OUTPUT"
+          echo "published=true" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "New release: $tag"
         fi
 
-    - name: Create git tag
-      if: steps.changesets.outputs.published == 'true' && steps.tag-check.outputs.exists == 'false'
+    # Step 3: Create unified repo-level tag
+    - name: Create repo-level tag
+      if: steps.detect-release.outputs.published == 'true'
       shell: bash
       run: |
-        tag="v${{ steps.version.outputs.version }}"
-        git tag "$tag"
-        git push origin "$tag"
+        git tag "v${{ steps.detect-release.outputs.version }}"
+        git push origin "v${{ steps.detect-release.outputs.version }}"
 
-    - name: Check if GitHub Release exists
-      if: steps.changesets.outputs.published == 'true' && inputs.create-github-release == 'true'
-      id: release-check
+    # Step 4: Collect private packages that were tagged but not npm-published.
+    # changesets/action only reports npm-published packages in publishedPackages.
+    # Private packages with privatePackages.tag: true get git tags silently.
+    # We diff all workspace packages against the npm-published list to find them.
+    - name: Collect tagged-only packages
+      if: steps.detect-release.outputs.published == 'true'
+      id: collect-tagged
       shell: bash
-      env:
-        GH_TOKEN: ${{ env.GITHUB_TOKEN }}
       run: |
-        if gh release view "v${{ steps.version.outputs.version }}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-          echo "exists=true" >> "$GITHUB_OUTPUT"
-        else
-          echo "exists=false" >> "$GITHUB_OUTPUT"
-        fi
-
-    - name: Create GitHub Release
-      if: steps.changesets.outputs.published == 'true' && inputs.create-github-release == 'true' && steps.release-check.outputs.exists == 'false'
-      shell: bash
+        packages=$(node ${{ github.action_path }}/collect-tagged.mjs)
+        echo "packages=$packages" >> "$GITHUB_OUTPUT"
+        echo "Tagged-only packages: $packages"
       env:
-        GH_TOKEN: ${{ env.GITHUB_TOKEN }}
-      run: |
-        gh release create "v${{ steps.version.outputs.version }}" \
-          --repo "${{ github.repository }}" \
-          --generate-notes
+        CHANGESETS_PUBLISHED: ${{ steps.changesets.outputs.publishedPackages || '[]' }}
