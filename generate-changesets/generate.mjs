@@ -17,14 +17,64 @@
 
 import { execSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join, resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join, resolve } from "node:path";
 
 const ROOT = process.cwd();
 const CHANGESET_DIR = join(ROOT, ".changeset");
 const MAX_TS = 9999999999;
 
 let capMajor = false;
+
+// --- Workspace discovery ---
+// NOTE: This function is duplicated in release/collect-tagged.mjs.
+// If you change the workspace resolution logic, update both files.
+
+function getWorkspaceEntries(root) {
+	try {
+		const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf-8"));
+		const ws = pkg.workspaces;
+		if (Array.isArray(ws)) return ws;
+		if (ws && Array.isArray(ws.packages)) return ws.packages;
+	} catch {}
+	try {
+		const yaml = readFileSync(join(root, "pnpm-workspace.yaml"), "utf-8");
+		const entries = [];
+		for (const line of yaml.split("\n")) {
+			const match = line.match(/^\s*-\s*['"]?([^'"}\s]+)/);
+			if (match) entries.push(match[1]);
+		}
+		if (entries.length > 0) return entries;
+	} catch {}
+	return [];
+}
+
+function discoverPackages() {
+	const mapping = new Map();
+	for (const entry of getWorkspaceEntries(ROOT)) {
+		if (entry.endsWith("/*")) {
+			const parent = entry.slice(0, -2);
+			const absParent = join(ROOT, parent);
+			if (!existsSync(absParent)) continue;
+			for (const child of readdirSync(absParent)) {
+				const pkgPath = join(absParent, child, "package.json");
+				if (!existsSync(pkgPath)) continue;
+				try {
+					const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+					if (pkg.name) mapping.set(`${parent}/${child}/`, pkg.name);
+				} catch {}
+			}
+		} else {
+			const dir = entry.replace(/\/$/, "");
+			const pkgPath = join(ROOT, dir, "package.json");
+			if (!existsSync(pkgPath)) continue;
+			try {
+				const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+				if (pkg.name) mapping.set(`${dir}/`, pkg.name);
+			} catch {}
+		}
+	}
+	return mapping;
+}
 
 // --- Conventional commit → bump mapping ---
 
@@ -51,66 +101,6 @@ function branchId(base) {
 	} catch {
 		return MAX_TS.toString(36).padStart(7, "0");
 	}
-}
-
-// --- Package discovery ---
-
-/** Returns raw workspace entries from package.json or pnpm-workspace.yaml. */
-function getWorkspaceEntries() {
-	// Try package.json workspaces (npm, bun, yarn)
-	try {
-		const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf-8"));
-		const ws = pkg.workspaces;
-		// Array form: ["packages/*"] (npm, bun, yarn)
-		if (Array.isArray(ws)) return ws;
-		// Object form: { packages: ["packages/*"] } (yarn classic)
-		if (ws && Array.isArray(ws.packages)) return ws.packages;
-	} catch {}
-
-	// Try pnpm-workspace.yaml
-	try {
-		const yaml = readFileSync(join(ROOT, "pnpm-workspace.yaml"), "utf-8");
-		const entries = [];
-		for (const line of yaml.split("\n")) {
-			const match = line.match(/^\s*-\s*['"]?([^'"}\s]+)/);
-			if (match) entries.push(match[1]);
-		}
-		if (entries.length > 0) return entries;
-	} catch {}
-
-	return [];
-}
-
-function discoverPackages() {
-	const mapping = new Map();
-
-	for (const entry of getWorkspaceEntries()) {
-		if (entry.endsWith("/*")) {
-			// Glob pattern: "packages/*" — scan subdirectories
-			const parent = entry.slice(0, -2);
-			const absParent = join(ROOT, parent);
-			if (!existsSync(absParent)) continue;
-			for (const child of readdirSync(absParent)) {
-				const pkgPath = join(absParent, child, "package.json");
-				if (!existsSync(pkgPath)) continue;
-				try {
-					const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
-					if (pkg.name) mapping.set(`${parent}/${child}/`, pkg.name);
-				} catch {}
-			}
-		} else {
-			// Direct path: "generate-changesets" — the entry itself is a package
-			const dir = entry.replace(/\/$/, "");
-			const pkgPath = join(ROOT, dir, "package.json");
-			if (!existsSync(pkgPath)) continue;
-			try {
-				const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
-				if (pkg.name) mapping.set(`${dir}/`, pkg.name);
-			} catch {}
-		}
-	}
-
-	return mapping;
 }
 
 // --- Git helpers ---
