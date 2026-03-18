@@ -1,0 +1,116 @@
+name: "Generate Changesets"
+description: "Auto-generate changeset files from conventional commits on a PR, optionally enhanced by GitHub Copilot CLI"
+
+inputs:
+  base:
+    description: "Base branch to diff against"
+    required: false
+    default: "origin/main"
+  cap-major:
+    description: "Cap major bumps to minor (useful pre-1.0)"
+    required: false
+    default: "true"
+  copilot-pat:
+    description: "GitHub PAT with Copilot access for AI changelog enhancement. If omitted, raw commit details are kept."
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Skip if last commit was from this action
+      id: check
+      shell: bash
+      run: |
+        msg=$(git log -1 --format="%s")
+        if [ "$msg" = "ci: generate changesets" ]; then
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Fetch full history
+      if: steps.check.outputs.skip != 'true'
+      shell: bash
+      run: git fetch --unshallow || true
+
+    - name: Generate template changesets
+      if: steps.check.outputs.skip != 'true'
+      shell: bash
+      run: >-
+        node ${{ github.action_path }}/generate.mjs
+        --branch ${{ github.head_ref }}
+        --repo ${{ github.repository }}
+        --pr ${{ github.event.pull_request.number }}
+        --base ${{ inputs.base }}
+        ${{ inputs.cap-major == 'true' && '--cap-major' || '' }}
+
+    - name: Compute branch id
+      if: steps.check.outputs.skip != 'true'
+      id: bid
+      shell: bash
+      run: |
+        ts=$(git log --format="%ct" --reverse ${{ inputs.base }}..HEAD | head -1)
+        value=$(node -e "console.log((9999999999 - ${ts:-0}).toString(36).padStart(7, '0'))")
+        echo "value=$value" >> "$GITHUB_OUTPUT"
+
+    - name: Install Copilot CLI
+      if: steps.check.outputs.skip != 'true' && inputs.copilot-pat != ''
+      shell: bash
+      run: npm install -g @github/copilot
+
+    - name: Enhance changesets with Copilot
+      if: steps.check.outputs.skip != 'true' && inputs.copilot-pat != ''
+      continue-on-error: true
+      shell: bash
+      env:
+        COPILOT_GITHUB_TOKEN: ${{ inputs.copilot-pat }}
+      run: |
+        shopt -s nullglob
+        files=(.changeset/auto-*-${{ steps.bid.outputs.value }}.md)
+        if [ ${#files[@]} -eq 0 ]; then
+          echo "No auto-generated changesets to enhance"
+          exit 0
+        fi
+
+        FILE_LIST=""
+        for file in "${files[@]}"; do
+          FILE_LIST+=$'\n'"  - ${file}"
+        done
+
+        copilot --yolo -p "You are enhancing auto-generated changeset files for a monorepo release.
+
+        Each file listed below contains:
+        1. A frontmatter block (between --- delimiters) — DO NOT modify the frontmatter
+        2. A metadata block (lines starting with >) with branch and PR info — DO NOT modify the metadata
+        3. A body with per-commit details: each commit has a ### <sha> header, message, changed files, and diff stats
+
+        Your task — update ALL files in a single pass:
+        1. Read each changeset file to get the commit details
+        2. For each commit SHA, run git show <sha> to review the actual diff
+        3. Read source files referenced in the commits for additional context
+        4. Replace only the commit details (everything after the metadata block) with an enhanced changelog
+
+        Changelog format:
+        - Concise bullet points of user-facing changes (terse, skip grammar for brevity)
+        - Group related changes together
+        - Add a BREAKING CHANGES section if any commits have breaking changes
+        - End with a 1-2 sentence summary
+        - Simple markdown, no emojis
+
+        Files to update:${FILE_LIST}
+
+        IMPORTANT: Preserve each file's frontmatter block exactly as-is. Only write to the files listed above."
+
+    - name: Commit and push changesets
+      if: steps.check.outputs.skip != 'true'
+      shell: bash
+      run: |
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git config user.name "github-actions[bot]"
+        git add .changeset/auto-*-${{ steps.bid.outputs.value }}.md 2>/dev/null || true
+        if ! git diff-index --quiet HEAD 2>/dev/null; then
+          git commit -m "ci: generate changesets"
+          git push
+          echo "Changesets committed and pushed"
+        else
+          echo "No changeset changes to commit"
+        fi
