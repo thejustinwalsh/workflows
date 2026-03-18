@@ -57,10 +57,14 @@ function branchId(base) {
 
 /** Returns raw workspace entries from package.json or pnpm-workspace.yaml. */
 function getWorkspaceEntries() {
-	// Try package.json workspaces
+	// Try package.json workspaces (npm, bun, yarn)
 	try {
 		const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf-8"));
-		if (Array.isArray(pkg.workspaces)) return pkg.workspaces;
+		const ws = pkg.workspaces;
+		// Array form: ["packages/*"] (npm, bun, yarn)
+		if (Array.isArray(ws)) return ws;
+		// Object form: { packages: ["packages/*"] } (yarn classic)
+		if (ws && Array.isArray(ws.packages)) return ws.packages;
 	} catch {}
 
 	// Try pnpm-workspace.yaml
