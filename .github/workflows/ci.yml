@@ -1,0 +1,18 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint workflow files
+        uses: raven-actions/actionlint@v2
+
+      - name: Security scan workflows
+        uses: zizmorcore/zizmor-action@v1
+
+      - name: Validate generate script syntax
+        run: node --check generate-changesets/generate.mjs

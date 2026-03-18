@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: [CI]
+    branches: [main]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+
+      - run: npm install
+
+      # Dogfood: use our own release action via local path
+      - id: release
+        uses: ./release
+        with:
+          version-command: npx changeset version
+          version-package: ./package.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Update floating major version tag (v1, v2, etc.)
+      # This is the convention for GitHub Actions — users pin to @v1
+      # and get all minor/patch updates automatically.
+      - name: Update major version tag
+        if: steps.release.outputs.published == 'true'
+        run: |
+          version="${{ steps.release.outputs.version }}"
+          major="v$(echo "$version" | cut -d. -f1)"
+          git tag -f "$major"
+          git push origin "$major" --force
+          echo "Updated floating tag: $major -> v$version"
