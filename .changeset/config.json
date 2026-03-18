@@ -1,8 +1,8 @@
 {
-	"$schema": "https://unpkg.com/@changesets/config@3.0.0/schema.json",
+	"$schema": "https://raw.githubusercontent.com/changesets/changesets/main/packages/config/schema.json",
 	"changelog": ["@changesets/changelog-github", { "repo": "thejustinwalsh/workflows" }],
 	"commit": false,
-	"fixed": [["@thejustinwalsh/generate-changesets", "@thejustinwalsh/release"]],
+	"fixed": [["@thejustinwalsh/generate-changesets", "@thejustinwalsh/release", "@thejustinwalsh/filter-packages"]],
 	"linked": [],
 	"access": "restricted",
 	"baseBranch": "main",

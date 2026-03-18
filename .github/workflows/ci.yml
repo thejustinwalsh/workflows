@@ -10,7 +10,7 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Lint workflow files
         uses: raven-actions/actionlint@v2
@@ -18,5 +18,11 @@ jobs:
       - name: Security scan workflows
         uses: zizmorcore/zizmor-action@v0.5.2
 
-      - name: Validate generate script syntax
-        run: node --check generate-changesets/generate.mjs
+      - name: Validate script syntax
+        run: |
+          node --check generate-changesets/generate.mjs
+          node --check release/collect-tagged.mjs
+          node --check filter-packages/filter.mjs
+
+      - name: Run tests
+        run: node --test tests/*.test.mjs
