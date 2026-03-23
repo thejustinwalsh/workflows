@@ -98,6 +98,8 @@ from thejustinwalsh/workflows. Follow these steps exactly:
    To create one manually: `npx changeset`
 
 5. Create .github/workflows/changeset.yml:
+   If using copilot-pat, consider gating on CI success via workflow_run
+   to avoid wasting Copilot tokens on failing PRs.
 
    name: Generate Changeset
    on:
