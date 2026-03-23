@@ -1,5 +1,11 @@
 # @thejustinwalsh/release
 
+## 1.4.1
+
+### Patch Changes
+
+- [#9](https://github.com/thejustinwalsh/workflows/pull/9) [`dd93af8`](https://github.com/thejustinwalsh/workflows/commit/dd93af89217b18f430f9336cbd71a9fb76c082bd) Thanks [@thejustinwalsh](https://github.com/thejustinwalsh)! - fix: push git tags when per-package GitHub Releases are disabled
+
 ## 1.4.0
 
 ### Minor Changes
