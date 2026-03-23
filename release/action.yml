@@ -1,5 +1,5 @@
 name: "Changeset Release"
-description: "Version, publish, and tag via changesets. Outputs what was published to npm, what was tagged (private), and whether anything was released."
+description: "Version, publish, and tag via changesets. Outputs what was published and whether anything was released."
 
 inputs:
   version-command:
@@ -17,21 +17,15 @@ inputs:
 
 outputs:
   released:
-    description: "true if anything was published or tagged — gate downstream jobs on this"
+    description: "true if anything was published — gate downstream jobs on this"
     value: ${{ steps.summary.outputs.released }}
   published-packages:
-    description: "JSON array of npm-published packages [{name, version}]"
+    description: "JSON array of published packages [{name, version}] (includes private packages that were git-tagged)"
     value: ${{ steps.changesets.outputs.publishedPackages }}
-  tagged-packages:
-    description: "JSON array of private packages that were git-tagged but NOT npm-published [{name, version}]"
-    value: ${{ steps.collect-tagged.outputs.packages }}
 
 runs:
   using: "composite"
   steps:
-    # Step 1: Changesets creates a release PR or publishes.
-    # Public packages → npm publish + git tag + "New tag:" stdout
-    # Private packages (with privatePackages.tag: true) → git tag only, no stdout
     - name: Create Release Pull Request or Publish
       id: changesets
       uses: changesets/action@v1
@@ -43,31 +37,16 @@ runs:
       env:
         GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
 
-    # Step 2: Collect private packages that were tagged but not npm-published.
-    - name: Collect tagged-only packages
-      id: collect-tagged
-      shell: bash
-      run: |
-        packages=$(node ${{ github.action_path }}/collect-tagged.mjs)
-        echo "packages=$packages" >> "$GITHUB_OUTPUT"
-        echo "Tagged packages: $packages"
-      env:
-        CHANGESETS_PUBLISHED: ${{ steps.changesets.outputs.publishedPackages || '[]' }}
-
-    # Step 3: Set released=true if anything was published or tagged.
     - name: Summarize
       id: summary
       shell: bash
       run: |
         published='${{ steps.changesets.outputs.publishedPackages }}'
-        tagged='${{ steps.collect-tagged.outputs.packages }}'
-
         has_published=$(node -e "console.log(JSON.parse(process.argv[1] || '[]').length > 0)" "$published")
-        has_tagged=$(node -e "console.log(JSON.parse(process.argv[1] || '[]').length > 0)" "$tagged")
 
-        if [ "$has_published" = "true" ] || [ "$has_tagged" = "true" ]; then
+        if [ "$has_published" = "true" ]; then
           echo "released=true" >> "$GITHUB_OUTPUT"
-          echo "Released: published=$has_published tagged=$has_tagged"
+          echo "Released: $published"
         else
           echo "released=false" >> "$GITHUB_OUTPUT"
           echo "Nothing released"

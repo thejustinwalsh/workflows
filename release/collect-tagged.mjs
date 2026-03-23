@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * Collects private packages that were git-tagged but not npm-published.
+ * Workspace discovery and package listing utility.
+ * Used by tests to verify workspace resolution logic.
  *
  * Reads the list of npm-published packages from CHANGESETS_PUBLISHED env var,
  * discovers all workspace packages, and outputs the private ones that
- * changesets tagged silently (via privatePackages.tag: true).
+ * were not npm-published.
  */
 
-import { execSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
@@ -62,24 +62,13 @@ function listPackages(root) {
 	return packages;
 }
 
-/** Check if a git tag exists for this package@version. */
-function hasGitTag(name, version) {
-	const tag = `${name}@${version}`;
-	try {
-		execSync(`git rev-parse --verify "refs/tags/${tag}" 2>/dev/null`, { stdio: "pipe" });
-		return true;
-	} catch {
-		return false;
-	}
-}
-
 // --- Main ---
 
 const publishedRaw = process.env.CHANGESETS_PUBLISHED || "[]";
 const published = new Set(JSON.parse(publishedRaw).map((p) => p.name));
 
 const tagged = listPackages(process.cwd())
-	.filter((pkg) => pkg.private && !published.has(pkg.name) && hasGitTag(pkg.name, pkg.version))
+	.filter((pkg) => pkg.private && !published.has(pkg.name))
 	.map(({ name, version }) => ({ name, version }));
 
 console.log(JSON.stringify(tagged));
