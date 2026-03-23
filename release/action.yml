@@ -42,6 +42,11 @@ runs:
       env:
         GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
 
+    - name: Push tags
+      if: inputs.create-github-releases == 'false'
+      shell: bash
+      run: git push --tags
+
     - name: Summarize
       id: summary
       shell: bash
