@@ -14,6 +14,16 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Get PR info
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pr=$(gh api "repos/${{ github.repository }}/commits/${{ github.event.workflow_run.head_sha }}/pulls" \
+            --jq '.[0].number // empty')
+          echo "number=${pr}" >> "$GITHUB_OUTPUT"
+          echo "PR #${pr} on branch ${{ github.event.workflow_run.head_branch }}"
+
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.workflow_run.head_branch }}
@@ -21,4 +31,6 @@ jobs:
 
       - uses: ./generate-changesets
         with:
+          head-ref: ${{ github.event.workflow_run.head_branch }}
+          pr-number: ${{ steps.pr.outputs.number }}
           copilot-pat: ${{ secrets.COPILOT_PAT }}

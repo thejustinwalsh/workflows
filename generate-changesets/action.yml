@@ -14,6 +14,14 @@ inputs:
     description: "GitHub PAT with Copilot access for AI changelog enhancement. If omitted, raw commit details are kept."
     required: false
     default: ""
+  head-ref:
+    description: "PR head branch name. Defaults to github.head_ref. Pass explicitly when triggered via workflow_run."
+    required: false
+    default: ""
+  pr-number:
+    description: "PR number for metadata. Defaults to github.event.pull_request.number. Pass explicitly when triggered via workflow_run."
+    required: false
+    default: ""
 
 runs:
   using: "composite"
@@ -45,18 +53,22 @@ runs:
       env:
         INPUT_BASE: ${{ inputs.base }}
         INPUT_CAP_MAJOR: ${{ inputs.cap-major }}
-        INPUT_HEAD_REF: ${{ github.head_ref }}
+        INPUT_HEAD_REF: ${{ inputs.head-ref || github.head_ref }}
+        INPUT_PR_NUMBER: ${{ inputs.pr-number || github.event.pull_request.number }}
       run: |
         cap_flag=""
         if [ "$INPUT_CAP_MAJOR" = "true" ]; then
           cap_flag="--cap-major"
         fi
+        pr_flag=""
+        if [ -n "$INPUT_PR_NUMBER" ]; then
+          pr_flag="--pr $INPUT_PR_NUMBER"
+        fi
         node ${{ github.action_path }}/generate.mjs \
           --branch "$INPUT_HEAD_REF" \
           --repo "${{ github.repository }}" \
-          --pr "${{ github.event.pull_request.number }}" \
           --base "$INPUT_BASE" \
-          $cap_flag
+          $pr_flag $cap_flag
 
     - name: Compute branch id
       if: steps.check.outputs.skip != 'true'
