@@ -1,0 +1,110 @@
+name: "Fixed GitHub Release"
+description: "Create a single GitHub Release for a changesets fixed group with aggregated changelog notes and artifact support."
+
+inputs:
+  fixed-group:
+    description: "Index into the fixed array in .changeset/config.json"
+    required: false
+    default: "0"
+  tag-prefix:
+    description: "Prefix for the release tag (default: v). Use a unique prefix per group when releasing multiple fixed groups."
+    required: false
+    default: "v"
+  artifacts:
+    description: "Newline-separated list of files to attach. Supports path#Display Label format for named assets."
+    required: false
+    default: ""
+
+outputs:
+  released:
+    description: "true if a GitHub Release was created, false if skipped (already exists)"
+    value: ${{ steps.result.outputs.released }}
+  release-url:
+    description: "URL of the created release"
+    value: ${{ steps.result.outputs.release-url }}
+  release-tag:
+    description: "Tag of the created release (e.g. v1.3.0)"
+    value: ${{ steps.result.outputs.release-tag }}
+  version:
+    description: "The version from the fixed group (e.g. 1.3.0)"
+    value: ${{ steps.result.outputs.version }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Generate release notes
+      id: notes
+      shell: bash
+      run: |
+        result=$(node "${{ github.action_path }}/fixed-release.mjs" \
+          --fixed-group "${{ inputs.fixed-group }}" \
+          --tag-prefix '${{ inputs.tag-prefix }}' \
+          --repo "${{ github.repository }}")
+
+        version=$(echo "$result" | node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')).version)")
+        tag=$(echo "$result" | node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')).tag)")
+        echo "$result" | node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')).body)" > /tmp/fixed-release-body.md
+
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+        echo "tag=$tag" >> "$GITHUB_OUTPUT"
+        echo "Generated release notes for $tag"
+
+    - name: Check if release exists
+      id: check
+      shell: bash
+      run: |
+        tag="${{ steps.notes.outputs.tag }}"
+        if gh release view "$tag" --repo "${{ github.repository }}" &>/dev/null; then
+          echo "exists=true" >> "$GITHUB_OUTPUT"
+          echo "Release $tag already exists — skipping"
+        else
+          echo "exists=false" >> "$GITHUB_OUTPUT"
+        fi
+      env:
+        GH_TOKEN: ${{ env.GITHUB_TOKEN }}
+
+    - name: Create release
+      if: steps.check.outputs.exists == 'false'
+      shell: bash
+      run: |
+        tag="${{ steps.notes.outputs.tag }}"
+        gh release create "$tag" \
+          --repo "${{ github.repository }}" \
+          --title "$tag" \
+          --notes-file /tmp/fixed-release-body.md
+        echo "Created release $tag"
+      env:
+        GH_TOKEN: ${{ env.GITHUB_TOKEN }}
+
+    - name: Upload artifacts
+      if: steps.check.outputs.exists == 'false' && inputs.artifacts != ''
+      shell: bash
+      run: |
+        tag="${{ steps.notes.outputs.tag }}"
+        while IFS= read -r asset; do
+          [ -z "$asset" ] && continue
+          echo "Uploading: ${asset}"
+          gh release upload "$tag" "${asset}" \
+            --repo "${{ github.repository }}" --clobber
+        done <<< "${{ inputs.artifacts }}"
+      env:
+        GH_TOKEN: ${{ env.GITHUB_TOKEN }}
+
+    - name: Set outputs
+      id: result
+      shell: bash
+      run: |
+        echo "version=${{ steps.notes.outputs.version }}" >> "$GITHUB_OUTPUT"
+        echo "release-tag=${{ steps.notes.outputs.tag }}" >> "$GITHUB_OUTPUT"
+        if [ "${{ steps.check.outputs.exists }}" = "false" ]; then
+          echo "released=true" >> "$GITHUB_OUTPUT"
+          url=$(gh release view "${{ steps.notes.outputs.tag }}" --repo "${{ github.repository }}" --json url -q .url)
+          echo "release-url=$url" >> "$GITHUB_OUTPUT"
+          echo "Released: ${{ steps.notes.outputs.tag }} — $url"
+        else
+          echo "released=false" >> "$GITHUB_OUTPUT"
+          echo "release-url=" >> "$GITHUB_OUTPUT"
+          echo "Skipped: release already exists"
+        fi
+      env:
+        GH_TOKEN: ${{ env.GITHUB_TOKEN }}

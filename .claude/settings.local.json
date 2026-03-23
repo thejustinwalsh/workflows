@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:github.com)",
+      "WebSearch",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(cp .changeset/config.json /tmp/config-backup.json)",
+      "Bash(cp /tmp/test-config.json .changeset/config.json)",
+      "Bash(node fixed-github-release/fixed-release.mjs --fixed-group 0 --repo thejustinwalsh/workflows)",
+      "Bash(cp /tmp/config-backup.json .changeset/config.json)",
+      "Bash(npm test:*)"
+    ]
+  }
+}

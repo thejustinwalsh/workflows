@@ -14,6 +14,10 @@ inputs:
     description: "Commit message for the release PR"
     required: false
     default: "chore: release"
+  create-github-releases:
+    description: "Whether changesets creates per-package GitHub Releases (default: true). Set to false when using fixed-github-release."
+    required: false
+    default: "true"
 
 outputs:
   released:
@@ -34,6 +38,7 @@ runs:
         version: ${{ inputs.version-command }}
         title: ${{ inputs.title }}
         commit: ${{ inputs.commit }}
+        createGithubReleases: ${{ inputs.create-github-releases }}
       env:
         GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
 

@@ -126,6 +126,7 @@ jobs:
 | `version-command` | `npx changeset version` | Command to bump versions |
 | `title` | `chore: release` | Release PR title |
 | `commit` | `chore: release` | Release PR commit message |
+| `create-github-releases` | `true` | Whether changesets creates per-package GitHub Releases. Set to `false` when using [`fixed-github-release`](../fixed-github-release) |
 
 ## Outputs
 
