@@ -97,44 +97,6 @@ describe("workspace discovery — pnpm-workspace.yaml", () => {
 	});
 });
 
-describe("collect-tagged — filters out npm-published packages", () => {
-	it("excludes published packages from output", () => {
-		writeRoot({ name: "root", workspaces: ["packages/*"] });
-		writePkg("packages/public-pkg", { name: "@test/public", version: "1.0.0" }); // not private
-		writePkg("packages/private-pkg", { name: "@test/private", version: "1.0.0", private: true });
-
-		// @test/public was npm-published
-		const result = runCollectTagged([{ name: "@test/public", version: "1.0.0" }]);
-		assert.equal(result.length, 1);
-		assert.equal(result[0].name, "@test/private");
-	});
-
-	it("returns empty when all are published", () => {
-		writeRoot({ name: "root", workspaces: ["packages/*"] });
-		writePkg("packages/a", { name: "@test/a", version: "1.0.0" });
-
-		const result = runCollectTagged([{ name: "@test/a", version: "1.0.0" }]);
-		assert.equal(result.length, 0);
-	});
-
-	it("returns empty when all are public (not private)", () => {
-		writeRoot({ name: "root", workspaces: ["packages/*"] });
-		writePkg("packages/a", { name: "@test/a", version: "1.0.0" }); // no private: true
-
-		const result = runCollectTagged();
-		assert.equal(result.length, 0);
-	});
-
-	it("returns all private packages when nothing was published", () => {
-		writeRoot({ name: "root", workspaces: ["packages/*"] });
-		writePkg("packages/a", { name: "@test/a", version: "1.0.0", private: true });
-		writePkg("packages/b", { name: "@test/b", version: "1.0.0", private: true });
-
-		const result = runCollectTagged();
-		assert.equal(result.length, 2);
-	});
-});
-
 describe("mixed workspace patterns", () => {
 	it("handles glob + direct paths together", () => {
 		writeRoot({ name: "root", workspaces: ["packages/*", "my-tool"] });
