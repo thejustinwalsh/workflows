@@ -55,29 +55,29 @@ runs:
     - name: Check if release exists
       id: check
       shell: bash
+      env:
+        GH_TOKEN: ${{ env.GITHUB_TOKEN }}
+        RELEASE_TAG: ${{ steps.notes.outputs.tag }}
       run: |
-        tag="${{ steps.notes.outputs.tag }}"
-        if gh release view "$tag" --repo "${{ github.repository }}" &>/dev/null; then
+        if gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" &>/dev/null; then
           echo "exists=true" >> "$GITHUB_OUTPUT"
-          echo "Release $tag already exists — skipping"
+          echo "Release $RELEASE_TAG already exists — skipping"
         else
           echo "exists=false" >> "$GITHUB_OUTPUT"
         fi
-      env:
-        GH_TOKEN: ${{ env.GITHUB_TOKEN }}
 
     - name: Create release
       if: steps.check.outputs.exists == 'false'
       shell: bash
-      run: |
-        tag="${{ steps.notes.outputs.tag }}"
-        gh release create "$tag" \
-          --repo "${{ github.repository }}" \
-          --title "$tag" \
-          --notes-file /tmp/fixed-release-body.md
-        echo "Created release $tag"
       env:
         GH_TOKEN: ${{ env.GITHUB_TOKEN }}
+        RELEASE_TAG: ${{ steps.notes.outputs.tag }}
+      run: |
+        gh release create "$RELEASE_TAG" \
+          --repo "${{ github.repository }}" \
+          --title "$RELEASE_TAG" \
+          --notes-file /tmp/fixed-release-body.md
+        echo "Created release $RELEASE_TAG"
 
     - name: Upload artifacts
       if: steps.check.outputs.exists == 'false' && inputs.artifacts != ''
@@ -85,30 +85,33 @@ runs:
       env:
         GH_TOKEN: ${{ env.GITHUB_TOKEN }}
         INPUT_ARTIFACTS: ${{ inputs.artifacts }}
+        RELEASE_TAG: ${{ steps.notes.outputs.tag }}
       run: |
-        tag="${{ steps.notes.outputs.tag }}"
         while IFS= read -r asset; do
           [ -z "$asset" ] && continue
           echo "Uploading: ${asset}"
-          gh release upload "$tag" "${asset}" \
+          gh release upload "$RELEASE_TAG" "${asset}" \
             --repo "${{ github.repository }}" --clobber
         done <<< "$INPUT_ARTIFACTS"
 
     - name: Set outputs
       id: result
       shell: bash
+      env:
+        GH_TOKEN: ${{ env.GITHUB_TOKEN }}
+        RELEASE_TAG: ${{ steps.notes.outputs.tag }}
+        RELEASE_VERSION: ${{ steps.notes.outputs.version }}
+        RELEASE_EXISTS: ${{ steps.check.outputs.exists }}
       run: |
-        echo "version=${{ steps.notes.outputs.version }}" >> "$GITHUB_OUTPUT"
-        echo "release-tag=${{ steps.notes.outputs.tag }}" >> "$GITHUB_OUTPUT"
-        if [ "${{ steps.check.outputs.exists }}" = "false" ]; then
+        echo "version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+        echo "release-tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+        if [ "$RELEASE_EXISTS" = "false" ]; then
           echo "released=true" >> "$GITHUB_OUTPUT"
-          url=$(gh release view "${{ steps.notes.outputs.tag }}" --repo "${{ github.repository }}" --json url -q .url)
+          url=$(gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" --json url -q .url)
           echo "release-url=$url" >> "$GITHUB_OUTPUT"
-          echo "Released: ${{ steps.notes.outputs.tag }} — $url"
+          echo "Released: $RELEASE_TAG — $url"
         else
           echo "released=false" >> "$GITHUB_OUTPUT"
           echo "release-url=" >> "$GITHUB_OUTPUT"
           echo "Skipped: release already exists"
         fi
-      env:
-        GH_TOKEN: ${{ env.GITHUB_TOKEN }}
