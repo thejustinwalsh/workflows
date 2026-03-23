@@ -2,8 +2,7 @@ rules:
   unpinned-uses:
     config:
       policies:
-        - owner: "actions"
-          match: ref-pin
+        actions/*: ref-pin
   artipacked:
     ignore:
       # These workflows push to git but never upload artifacts,
