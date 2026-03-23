@@ -1,0 +1,11 @@
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        actions/*: ref-pin
+  artipacked:
+    ignore:
+      # These workflows push to git but never upload artifacts,
+      # so persisted credentials cannot leak via artifact exfiltration.
+      - changeset.yml
+      - release.yml

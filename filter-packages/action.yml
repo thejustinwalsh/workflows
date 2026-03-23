@@ -31,11 +31,15 @@ runs:
     - name: Filter packages
       id: filter
       shell: bash
+      env:
+        INPUT_PACKAGES: ${{ inputs.packages }}
+        INPUT_FILTER: ${{ inputs.filter }}
+        INPUT_EXCLUDE: ${{ inputs.exclude }}
       run: |
         result=$(node ${{ github.action_path }}/filter.mjs \
-          --packages '${{ inputs.packages }}' \
-          --filter '${{ inputs.filter }}' \
-          --exclude '${{ inputs.exclude }}')
+          --packages "$INPUT_PACKAGES" \
+          --filter "$INPUT_FILTER" \
+          --exclude "$INPUT_EXCLUDE")
         count=$(echo "$result" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8'));console.log(d.length)")
         echo "packages=$result" >> "$GITHUB_OUTPUT"
         echo "count=$count" >> "$GITHUB_OUTPUT"

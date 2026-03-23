@@ -1,21 +1,38 @@
 name: Generate Changeset
 
 on:
-  pull_request:
-    branches: [main]
-    types: [opened, synchronize]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
 
 jobs:
   generate-changeset:
     runs-on: ubuntu-latest
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request'
     permissions:
       contents: write
     steps:
+      - name: Get PR info
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          pr=$(gh api "repos/${{ github.repository }}/commits/${HEAD_SHA}/pulls" \
+            --jq '.[0].number // empty')
+          echo "number=${pr}" >> "$GITHUB_OUTPUT"
+          echo "PR #${pr} on branch ${HEAD_BRANCH}"
+
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.pull_request.head.ref }}
+          ref: ${{ github.event.workflow_run.head_branch }}
           fetch-depth: 0
 
       - uses: ./generate-changesets
         with:
+          head-ref: ${{ github.event.workflow_run.head_branch }}
+          pr-number: ${{ steps.pr.outputs.number }}
           copilot-pat: ${{ secrets.COPILOT_PAT }}

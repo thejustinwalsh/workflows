@@ -25,6 +25,20 @@ Handles the changeset release lifecycle: creates a release PR, publishes npm pac
     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
+### [`fixed-github-release`](./fixed-github-release)
+
+Create a single GitHub Release for a changesets [fixed group](https://github.com/changesets/changesets/blob/main/docs/fixed-packages.md) with aggregated changelog notes and artifact support. Use with `release` (set `create-github-releases: false`) when your monorepo versions packages together and you want one release instead of per-package releases.
+
+```yaml
+- uses: thejustinwalsh/workflows/fixed-github-release@v1
+  with:
+    artifacts: |
+      dist/app-x64.tar.gz#App (x64)
+      dist/app-arm64.tar.gz#App (arm64)
+  env:
+    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
+
 ### [`filter-packages`](./filter-packages)
 
 Filter a JSON package array by name pattern, scope, or exclusion list. Use with `published-packages` or `tagged-packages` from the release action to select specific packages for downstream matrix jobs.
@@ -84,6 +98,8 @@ from thejustinwalsh/workflows. Follow these steps exactly:
    To create one manually: `npx changeset`
 
 5. Create .github/workflows/changeset.yml:
+   If using copilot-pat, consider gating on CI success via workflow_run
+   to avoid wasting Copilot tokens on failing PRs.
 
    name: Generate Changeset
    on:
@@ -133,7 +149,7 @@ from thejustinwalsh/workflows. Follow these steps exactly:
            env:
              GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-     # Add downstream jobs here. Example:
+     # Add downstream jobs here. Example with per-package releases:
      # build:
      #   needs: release
      #   if: needs.release.outputs.released == 'true'
@@ -147,6 +163,28 @@ from thejustinwalsh/workflows. Follow these steps exactly:
      #         gh release create "$pkg" --generate-notes dist/*
      #       env:
      #         GH_TOKEN: ${{ github.token }}
+
+   For a single aggregate release (when using fixed groups), set
+   create-github-releases: false on the release action and add a
+   fixed-github-release job:
+
+     github-release:
+       needs: [release, build]
+       if: needs.release.outputs.released == 'true'
+       runs-on: ubuntu-latest
+       steps:
+         - uses: actions/checkout@v6
+         - uses: actions/download-artifact@v4
+           with:
+             name: release-artifacts
+             path: dist
+         - uses: thejustinwalsh/workflows/fixed-github-release@v1
+           with:
+             artifacts: |
+               dist/app-x64.tar.gz#App (x64)
+               dist/app-arm64.tar.gz#App (arm64)
+           env:
+             GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
    Adjust the install command (npm/bun/pnpm) to match your project.
    The "workflows: [CI]" trigger must match your CI workflow's name exactly.
