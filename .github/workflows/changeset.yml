@@ -18,11 +18,13 @@ jobs:
         id: pr
         env:
           GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
-          pr=$(gh api "repos/${{ github.repository }}/commits/${{ github.event.workflow_run.head_sha }}/pulls" \
+          pr=$(gh api "repos/${{ github.repository }}/commits/${HEAD_SHA}/pulls" \
             --jq '.[0].number // empty')
           echo "number=${pr}" >> "$GITHUB_OUTPUT"
-          echo "PR #${pr} on branch ${{ github.event.workflow_run.head_branch }}"
+          echo "PR #${pr} on branch ${HEAD_BRANCH}"
 
       - uses: actions/checkout@v6
         with:
