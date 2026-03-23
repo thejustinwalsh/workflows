@@ -32,7 +32,7 @@ runs:
   steps:
     - name: Create Release Pull Request or Publish
       id: changesets
-      uses: changesets/action@v1
+      uses: changesets/action@6a0a831ff30acef54f2c6aa1cbbc1096b066edaf # v1.7.0
       with:
         publish: npx changeset publish
         version: ${{ inputs.version-command }}
@@ -45,13 +45,14 @@ runs:
     - name: Summarize
       id: summary
       shell: bash
+      env:
+        PUBLISHED_PACKAGES: ${{ steps.changesets.outputs.publishedPackages }}
       run: |
-        published='${{ steps.changesets.outputs.publishedPackages }}'
-        has_published=$(node -e "console.log(JSON.parse(process.argv[1] || '[]').length > 0)" "$published")
+        has_published=$(node -e "console.log(JSON.parse(process.argv[1] || '[]').length > 0)" "$PUBLISHED_PACKAGES")
 
         if [ "$has_published" = "true" ]; then
           echo "released=true" >> "$GITHUB_OUTPUT"
-          echo "Released: $published"
+          echo "Released: $PUBLISHED_PACKAGES"
         else
           echo "released=false" >> "$GITHUB_OUTPUT"
           echo "Nothing released"

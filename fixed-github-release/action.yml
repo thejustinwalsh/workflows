@@ -35,10 +35,13 @@ runs:
     - name: Generate release notes
       id: notes
       shell: bash
+      env:
+        INPUT_FIXED_GROUP: ${{ inputs.fixed-group }}
+        INPUT_TAG_PREFIX: ${{ inputs.tag-prefix }}
       run: |
         result=$(node "${{ github.action_path }}/fixed-release.mjs" \
-          --fixed-group "${{ inputs.fixed-group }}" \
-          --tag-prefix '${{ inputs.tag-prefix }}' \
+          --fixed-group "$INPUT_FIXED_GROUP" \
+          --tag-prefix "$INPUT_TAG_PREFIX" \
           --repo "${{ github.repository }}")
 
         version=$(echo "$result" | node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')).version)")
@@ -79,6 +82,9 @@ runs:
     - name: Upload artifacts
       if: steps.check.outputs.exists == 'false' && inputs.artifacts != ''
       shell: bash
+      env:
+        GH_TOKEN: ${{ env.GITHUB_TOKEN }}
+        INPUT_ARTIFACTS: ${{ inputs.artifacts }}
       run: |
         tag="${{ steps.notes.outputs.tag }}"
         while IFS= read -r asset; do
@@ -86,9 +92,7 @@ runs:
           echo "Uploading: ${asset}"
           gh release upload "$tag" "${asset}" \
             --repo "${{ github.repository }}" --clobber
-        done <<< "${{ inputs.artifacts }}"
-      env:
-        GH_TOKEN: ${{ env.GITHUB_TOKEN }}
+        done <<< "$INPUT_ARTIFACTS"
 
     - name: Set outputs
       id: result

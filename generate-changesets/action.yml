@@ -30,30 +30,42 @@ runs:
     - name: Fetch full history and base branch
       if: steps.check.outputs.skip != 'true'
       shell: bash
+      env:
+        INPUT_BASE: ${{ inputs.base }}
       run: |
         git fetch --unshallow || true
         # Ensure the base ref is available (strip origin/ prefix if present)
-        base_branch="${{ inputs.base }}"
+        base_branch="${INPUT_BASE}"
         base_branch="${base_branch#origin/}"
         git fetch origin "$base_branch" || true
 
     - name: Generate template changesets
       if: steps.check.outputs.skip != 'true'
       shell: bash
-      run: >-
-        node ${{ github.action_path }}/generate.mjs
-        --branch ${{ github.head_ref }}
-        --repo ${{ github.repository }}
-        --pr ${{ github.event.pull_request.number }}
-        --base ${{ inputs.base }}
-        ${{ inputs.cap-major == 'true' && '--cap-major' || '' }}
+      env:
+        INPUT_BASE: ${{ inputs.base }}
+        INPUT_CAP_MAJOR: ${{ inputs.cap-major }}
+        INPUT_HEAD_REF: ${{ github.head_ref }}
+      run: |
+        cap_flag=""
+        if [ "$INPUT_CAP_MAJOR" = "true" ]; then
+          cap_flag="--cap-major"
+        fi
+        node ${{ github.action_path }}/generate.mjs \
+          --branch "$INPUT_HEAD_REF" \
+          --repo "${{ github.repository }}" \
+          --pr "${{ github.event.pull_request.number }}" \
+          --base "$INPUT_BASE" \
+          $cap_flag
 
     - name: Compute branch id
       if: steps.check.outputs.skip != 'true'
       id: bid
       shell: bash
+      env:
+        INPUT_BASE: ${{ inputs.base }}
       run: |
-        ts=$(git log --format="%ct" --reverse ${{ inputs.base }}..HEAD | head -1)
+        ts=$(git log --format="%ct" --reverse "${INPUT_BASE}..HEAD" | head -1)
         value=$(node -e "console.log((9999999999 - ${ts:-0}).toString(36).padStart(7, '0'))")
         echo "value=$value" >> "$GITHUB_OUTPUT"
 
@@ -68,9 +80,10 @@ runs:
       shell: bash
       env:
         COPILOT_GITHUB_TOKEN: ${{ inputs.copilot-pat }}
+        BID_VALUE: ${{ steps.bid.outputs.value }}
       run: |
         shopt -s nullglob
-        files=(.changeset/auto-*-${{ steps.bid.outputs.value }}.md)
+        files=(.changeset/auto-*-${BID_VALUE}.md)
         if [ ${#files[@]} -eq 0 ]; then
           echo "No auto-generated changesets to enhance"
           exit 0
@@ -108,10 +121,12 @@ runs:
     - name: Commit and push changesets
       if: steps.check.outputs.skip != 'true'
       shell: bash
+      env:
+        BID_VALUE: ${{ steps.bid.outputs.value }}
       run: |
         git config user.email "github-actions[bot]@users.noreply.github.com"
         git config user.name "github-actions[bot]"
-        git add .changeset/auto-*-${{ steps.bid.outputs.value }}.md 2>/dev/null || true
+        git add .changeset/auto-*-${BID_VALUE}.md 2>/dev/null || true
         if ! git diff-index --quiet HEAD 2>/dev/null; then
           git commit -m "ci: generate changesets"
           git push

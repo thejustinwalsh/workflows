@@ -11,18 +11,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Lint workflow files
-        uses: raven-actions/actionlint@v2
+        uses: raven-actions/actionlint@205b530c5d9fa8f44ae9ed59f341a0db994aa6f8 # v2.1.2
 
       - name: Security scan workflows
-        uses: zizmorcore/zizmor-action@v0.5.2
+        uses: zizmorcore/zizmor-action@71321a20a9ded102f6e9ce5718a2fcec2c4f70d8 # v0.5.2
 
       - name: Validate script syntax
         run: |
           node --check generate-changesets/generate.mjs
           node --check release/collect-tagged.mjs
           node --check filter-packages/filter.mjs
+          node --check fixed-github-release/fixed-release.mjs
 
       - name: Run tests
         run: node --test tests/*.test.mjs
