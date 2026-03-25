@@ -21,6 +21,7 @@ import { join, resolve } from "node:path";
 
 const ROOT = process.cwd();
 const CHANGESET_DIR = join(ROOT, ".changeset");
+const CHANGESET_CONFIG = join(CHANGESET_DIR, "config.json");
 const MAX_TS = 9999999999;
 
 let capMajor = false;
@@ -74,6 +75,17 @@ function discoverPackages() {
 		}
 	}
 	return mapping;
+}
+
+// --- Changeset config ---
+
+function loadIgnoredPackages() {
+	try {
+		const config = JSON.parse(readFileSync(CHANGESET_CONFIG, "utf-8"));
+		return new Set(Array.isArray(config.ignore) ? config.ignore : []);
+	} catch {
+		return new Set();
+	}
 }
 
 // --- Conventional commit → bump mapping ---
@@ -285,10 +297,15 @@ function main() {
 	console.log(`Scanning conventional commits: ${args.base}..HEAD (branch: ${args.branch}, id: ${id})\n`);
 
 	const packageMap = discoverPackages();
+	const ignored = loadIgnoredPackages();
+	for (const [prefix, name] of packageMap) {
+		if (ignored.has(name)) packageMap.delete(prefix);
+	}
 	if (packageMap.size === 0) {
 		console.log("No packages found.");
 		return;
 	}
+	if (ignored.size > 0) console.log("Ignored:", [...ignored].join(", "));
 	console.log("Packages:", [...packageMap.values()].join(", "), "\n");
 
 	const shas = getCommitRange(args.base);
