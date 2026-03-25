@@ -77,7 +77,7 @@ runs:
       env:
         INPUT_BASE: ${{ inputs.base }}
       run: |
-        ts=$(git log --format="%ct" --reverse "${INPUT_BASE}..HEAD" | head -1)
+        ts=$(git log --format="%ct" --reverse "${INPUT_BASE}..HEAD" | head -1 || true)
         value=$(node -e "console.log((9999999999 - ${ts:-0}).toString(36).padStart(7, '0'))")
         echo "value=$value" >> "$GITHUB_OUTPUT"
 
