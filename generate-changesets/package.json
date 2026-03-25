@@ -1,6 +1,6 @@
 {
 	"name": "@thejustinwalsh/generate-changesets",
-	"version": "1.2.3",
+	"version": "1.2.4",
 	"private": true,
 	"description": "Auto-generate changeset files from conventional commits with optional Copilot enhancement"
 }
